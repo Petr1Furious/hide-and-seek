@@ -29,7 +29,6 @@ import net.md_5.bungee.api.ChatColor;
 public class Plugin extends JavaPlugin implements Listener {
 
     private boolean gameRunning = false;
-    private Scoreboard scoreboard;
     private Vector gameCenter;
     private int gameRadius;
     private Random random = new Random();
@@ -67,11 +66,11 @@ public class Plugin extends JavaPlugin implements Listener {
         gameRunning = true;
         getServer().sendMessage(Component.text("Starting game").color(NamedTextColor.GREEN));
 
-        setupScoreboard();
-
         for (var player : getServer().getOnlinePlayers()) {
             if (player.getGameMode() == GameMode.SURVIVAL) {
                 player.teleport(getFirstSolidBlock(getRandomLocationInSphere()).add(0.5, 0, 0.5));
+                player.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.INVISIBILITY,
+                        Integer.MAX_VALUE, 1, false, false));
             }
         }
 
@@ -88,19 +87,15 @@ public class Plugin extends JavaPlugin implements Listener {
     void resetGame() {
         gameRunning = false;
 
-        for (var objective : scoreboard.getObjectives()) {
-            objective.unregister();
-        }
+        var manager = Bukkit.getScoreboardManager();
 
         for (var player : getServer().getOnlinePlayers()) {
+            player.setScoreboard(manager.getMainScoreboard());
             if (player.getGameMode() == GameMode.SPECTATOR) {
                 teleportPlayerOnBlock(player);
                 player.setGameMode(GameMode.SURVIVAL);
             }
-        }
-
-        for (String entry : scoreboard.getEntries()) {
-            scoreboard.resetScores(entry);
+            player.removePotionEffect(org.bukkit.potion.PotionEffectType.INVISIBILITY);
         }
     }
 
@@ -171,7 +166,8 @@ public class Plugin extends JavaPlugin implements Listener {
                                                     .executes(ctx -> {
                                                         if (gameRunning) {
                                                             ctx.getSource().getExecutor().sendMessage(Component
-                                                                    .text("Game is already running").color(NamedTextColor.RED));
+                                                                    .text("Game is already running")
+                                                                    .color(NamedTextColor.RED));
                                                             return Command.SINGLE_SUCCESS;
                                                         }
                                                         int interval = IntegerArgumentType.getInteger(ctx, "interval");
@@ -255,23 +251,24 @@ public class Plugin extends JavaPlugin implements Listener {
         }, this);
     }
 
-    void setupScoreboard() {
-        ScoreboardManager manager = Bukkit.getScoreboardManager();
-        scoreboard = manager.getNewScoreboard();
-    }
-
     void updateDistances() {
-        if (!gameRunning)
+        if (!gameRunning) {
             return;
+        }
+
+        ScoreboardManager manager = Bukkit.getScoreboardManager();
 
         for (Player player1 : getServer().getOnlinePlayers()) {
             if (!isPlayerInGame(player1))
                 continue;
 
-            Objective playerObjective = scoreboard.getObjective(player1.getName());
+            Scoreboard scoreboard = manager.getNewScoreboard();
+            player1.setScoreboard(scoreboard);
             for (String entry : scoreboard.getEntries()) {
                 scoreboard.resetScores(entry);
             }
+
+            Objective playerObjective = scoreboard.getObjective(player1.getName());
             if (playerObjective == null) {
                 playerObjective = scoreboard.registerNewObjective(player1.getName(), Criteria.DUMMY,
                         Component.text("Distances").color(NamedTextColor.GOLD));
@@ -288,8 +285,6 @@ public class Plugin extends JavaPlugin implements Listener {
                 playerObjective.getScore(ChatColor.GOLD + distanceRange + ChatColor.AQUA + " " + player2.getName())
                         .setScore(roundedDistance);
             }
-
-            player1.setScoreboard(scoreboard);
         }
     }
 
