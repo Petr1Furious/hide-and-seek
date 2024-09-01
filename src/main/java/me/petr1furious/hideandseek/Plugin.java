@@ -18,9 +18,12 @@ import org.bukkit.util.Vector;
 import java.util.Random;
 
 import com.mojang.brigadier.Command;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 
 import io.papermc.paper.command.brigadier.Commands;
+import io.papermc.paper.command.brigadier.argument.ArgumentTypes;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -28,16 +31,19 @@ import net.md_5.bungee.api.ChatColor;
 
 public class Plugin extends JavaPlugin implements Listener {
 
-    private boolean gameRunning = false;
+    private GameStatus gameStatus = GameStatus.NOT_STARTED;
+    private boolean gameTeleport = true;
     private Vector gameCenter;
     private int gameRadius;
     private Random random = new Random();
+    private boolean checkingGameEnd = false;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
         loadGameSettings();
-        registerCommands();
+        registerCommand("hideandseek");
+        registerCommand("hs");
         registerEvents();
     }
 
@@ -59,18 +65,29 @@ public class Plugin extends JavaPlugin implements Listener {
     }
 
     boolean isPlayerInGame(Player player) {
-        return gameRunning && player.getGameMode() != GameMode.SPECTATOR && player.getGameMode() != GameMode.CREATIVE;
+        return gameStatus == GameStatus.RUNNING && player.getGameMode() != GameMode.SPECTATOR
+                && player.getGameMode() != GameMode.CREATIVE;
     }
 
-    void startGame(int interval) {
-        gameRunning = true;
+    void addPlayerToGame(Player player, boolean teleport) {
+        if (teleport) {
+            player.teleport(getFirstSolidBlock(getRandomLocationInSphere()).add(0.5, 0, 0.5));
+        } else {
+            teleportPlayerOnBlock(player);
+        }
+        player.setGameMode(GameMode.SURVIVAL);
+        player.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.INVISIBILITY,
+                Integer.MAX_VALUE, 1, false, false));
+    }
+
+    void startGame(int interval, boolean teleport) {
+        gameStatus = GameStatus.RUNNING;
+        gameTeleport = teleport;
         getServer().sendMessage(Component.text("Starting game").color(NamedTextColor.GREEN));
 
         for (var player : getServer().getOnlinePlayers()) {
             if (player.getGameMode() == GameMode.SURVIVAL) {
-                player.teleport(getFirstSolidBlock(getRandomLocationInSphere()).add(0.5, 0, 0.5));
-                player.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.INVISIBILITY,
-                        Integer.MAX_VALUE, 1, false, false));
+                addPlayerToGame(player, teleport);
             }
         }
 
@@ -84,18 +101,21 @@ public class Plugin extends JavaPlugin implements Listener {
         resetGame();
     }
 
-    void resetGame() {
-        gameRunning = false;
-
+    void resetPlayer(Player player) {
         var manager = Bukkit.getScoreboardManager();
+        player.setScoreboard(manager.getMainScoreboard());
+        if (player.getGameMode() == GameMode.SPECTATOR) {
+            player.setGameMode(GameMode.SURVIVAL);
+            teleportPlayerOnBlock(player);
+        }
+        player.removePotionEffect(org.bukkit.potion.PotionEffectType.INVISIBILITY);
+    }
+
+    void resetGame() {
+        gameStatus = GameStatus.NOT_STARTED;
 
         for (var player : getServer().getOnlinePlayers()) {
-            player.setScoreboard(manager.getMainScoreboard());
-            if (player.getGameMode() == GameMode.SPECTATOR) {
-                teleportPlayerOnBlock(player);
-                player.setGameMode(GameMode.SURVIVAL);
-            }
-            player.removePotionEffect(org.bukkit.potion.PotionEffectType.INVISIBILITY);
+            resetPlayer(player);
         }
     }
 
@@ -144,40 +164,45 @@ public class Plugin extends JavaPlugin implements Listener {
         }
     }
 
-    void registerCommands() {
+    void startGameCommand(int interval, boolean teleport) {
+        if (gameStatus == GameStatus.RUNNING) {
+            getServer().broadcast(Component.text("Game is already running").color(NamedTextColor.RED));
+            return;
+        }
+        startGame(interval, teleport);
+    }
+
+    void registerCommand(String name) {
         var manager = getLifecycleManager();
         manager.registerEventHandler(LifecycleEvents.COMMANDS, event -> {
             var commands = event.registrar();
-            var hideAndSeekCommand = Commands.literal("hideandseek")
+            var hideAndSeekCommand = Commands.literal(name)
                     .requires(source -> source.getExecutor().hasPermission("hideandseek.command"))
                     .then(
                             Commands.literal("start")
                                     .executes(ctx -> {
-                                        if (gameRunning) {
-                                            ctx.getSource().getExecutor().sendMessage(Component
-                                                    .text("Game is already running").color(NamedTextColor.RED));
-                                            return Command.SINGLE_SUCCESS;
-                                        }
-                                        startGame(10);
+                                        startGameCommand(10, true);
                                         return Command.SINGLE_SUCCESS;
                                     })
                                     .then(
                                             Commands.argument("interval", IntegerArgumentType.integer(1))
                                                     .executes(ctx -> {
-                                                        if (gameRunning) {
-                                                            ctx.getSource().getExecutor().sendMessage(Component
-                                                                    .text("Game is already running")
-                                                                    .color(NamedTextColor.RED));
-                                                            return Command.SINGLE_SUCCESS;
-                                                        }
                                                         int interval = IntegerArgumentType.getInteger(ctx, "interval");
-                                                        startGame(interval);
+                                                        startGameCommand(interval, true);
                                                         return Command.SINGLE_SUCCESS;
-                                                    })))
+                                                    })
+                                                    .then(
+                                                            Commands.argument("teleport", BoolArgumentType.bool())
+                                                                    .executes(ctx -> {
+                                                                        boolean teleport = BoolArgumentType.getBool(ctx,
+                                                                                "teleport");
+                                                                        startGameCommand(10, teleport);
+                                                                        return Command.SINGLE_SUCCESS;
+                                                                    }))))
                     .then(
                             Commands.literal("stop")
                                     .executes(ctx -> {
-                                        if (!gameRunning) {
+                                        if (gameStatus == GameStatus.NOT_STARTED) {
                                             ctx.getSource().getExecutor().sendMessage(Component
                                                     .text("Game is not running").color(NamedTextColor.RED));
                                             return Command.SINGLE_SUCCESS;
@@ -209,42 +234,94 @@ public class Plugin extends JavaPlugin implements Listener {
                                                                         .color(NamedTextColor.GREEN));
                                                         return Command.SINGLE_SUCCESS;
                                                     })))
+                    .then(
+                            Commands.literal("join")
+                                    .requires(source -> source.getExecutor() instanceof Player)
+                                    .executes(ctx -> {
+                                        Player player = (Player) ctx.getSource().getExecutor();
+                                        if (isPlayerInGame(player)) {
+                                            player.sendMessage(Component.text("You are already in the game")
+                                                    .color(NamedTextColor.RED));
+                                            return Command.SINGLE_SUCCESS;
+                                        }
+                                        player.sendMessage(
+                                                Component.text("You joined the game").color(NamedTextColor.GREEN));
+                                        addPlayerToGame(player, gameTeleport);
+                                        return Command.SINGLE_SUCCESS;
+                                    }))
+                    .then(
+                            Commands.literal("join")
+                                    .requires(source -> source.getExecutor().hasPermission("hideandseek.command"))
+                                    .then(
+                                            Commands.argument("player", ArgumentTypes.player())
+                                                    .executes(ctx -> {
+                                                        String playerName = StringArgumentType.getString(ctx, "player");
+                                                        var player = getServer().getPlayer(playerName);
+                                                        if (isPlayerInGame(player)) {
+                                                            ctx.getSource().getExecutor().sendMessage(Component
+                                                                    .text(playerName).color(NamedTextColor.RED).append(
+                                                                            Component.text(" is already in the game")
+                                                                                    .color(NamedTextColor.RED)));
+                                                            return Command.SINGLE_SUCCESS;
+                                                        }
+                                                        player.sendMessage(Component.text("You joined the game")
+                                                                .color(NamedTextColor.GREEN));
+                                                        addPlayerToGame(player, gameTeleport);
+                                                        return Command.SINGLE_SUCCESS;
+                                                    })))
                     .build();
             commands.register(hideAndSeekCommand);
-            commands.register(Commands.literal("hs").redirect(hideAndSeekCommand).build());
         });
+    }
+
+    void endGame() {
+        gameStatus = GameStatus.ENDED;
+        var manager = Bukkit.getScoreboardManager();
+        for (var player : getServer().getOnlinePlayers()) {
+            player.setScoreboard(manager.getMainScoreboard());
+        }
+    }
+
+    void checkGameEnd() {
+        checkingGameEnd = false;
+
+        var playersInGame = 0;
+        Player lastPlayer = null;
+        for (var player : getServer().getOnlinePlayers()) {
+            if (isPlayerInGame(player)) {
+                playersInGame++;
+                lastPlayer = player;
+            }
+        }
+
+        if (playersInGame <= 1) {
+            if (lastPlayer == null) {
+                getServer().broadcast(Component.text("Game over! No players left!").color(NamedTextColor.RED));
+            } else {
+                getServer().broadcast(
+                        Component.text("Game over! ").color(NamedTextColor.RED)
+                                .append(Component.text(lastPlayer.getName()).color(NamedTextColor.BLUE))
+                                .append(Component.text(" wins!").color(NamedTextColor.RED)));
+            }
+            endGame();
+        }
     }
 
     void registerEvents() {
         getServer().getPluginManager().registerEvents(new Listener() {
             @EventHandler
             public void onPlayerDeath(PlayerDeathEvent event) {
-                if (gameRunning) {
-                    event.setCancelled(isPlayerInGame(event.getPlayer()));
+                if (gameStatus == GameStatus.RUNNING) {
+                    Player player = event.getPlayer();
+                    event.setCancelled(isPlayerInGame(player));
                     getServer().broadcast(event.deathMessage().color(NamedTextColor.GRAY));
-                    event.getPlayer().setGameMode(GameMode.SPECTATOR);
+                    player.setGameMode(GameMode.SPECTATOR);
 
-                    var playersInGame = 0;
-                    Player lastPlayer = null;
-                    for (var player : getServer().getOnlinePlayers()) {
-                        if (isPlayerInGame(player) && player != event.getPlayer()) {
-                            playersInGame++;
-                            lastPlayer = player;
-                        }
-                    }
-
-                    if (playersInGame <= 1) {
-                        if (lastPlayer == null) {
-                            getServer()
-                                    .broadcast(Component.text("Game over! No players left!").color(NamedTextColor.RED));
-                        } else {
-                            getServer().broadcast(
-                                    Component.text("Game over! ")
-                                            .color(NamedTextColor.RED)
-                                            .append(Component.text(lastPlayer.getName()).color(NamedTextColor.BLUE))
-                                            .append(Component.text(" wins!").color(NamedTextColor.RED)));
-                        }
-                        resetGame();
+                    if (!checkingGameEnd) {
+                        checkingGameEnd = true;
+                        getServer().getScheduler().scheduleSyncDelayedTask(Plugin.this, () -> {
+                            checkGameEnd();
+                        }, 60);
                     }
                 }
             }
@@ -252,16 +329,13 @@ public class Plugin extends JavaPlugin implements Listener {
     }
 
     void updateDistances() {
-        if (!gameRunning) {
+        if (gameStatus != GameStatus.RUNNING) {
             return;
         }
 
         ScoreboardManager manager = Bukkit.getScoreboardManager();
 
         for (Player player1 : getServer().getOnlinePlayers()) {
-            if (!isPlayerInGame(player1))
-                continue;
-
             Scoreboard scoreboard = manager.getNewScoreboard();
             player1.setScoreboard(scoreboard);
             for (String entry : scoreboard.getEntries()) {
