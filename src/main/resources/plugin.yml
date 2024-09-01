@@ -1,0 +1,9 @@
+main: me.petr1furious.hideandseek.Plugin
+name: hide-and-seek
+version: 0.1
+api-version: 1.13
+commands:
+  gamestate:
+    description: Change the state of the game
+    usage: /hideandseek help
+    aliases: [hs]
