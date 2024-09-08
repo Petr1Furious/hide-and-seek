@@ -1,6 +1,8 @@
 package me.petr1furious.hideandseek;
 
 import org.bukkit.Location;
+import org.bukkit.entity.Arrow;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
 public class Utils {
@@ -52,5 +54,16 @@ public class Utils {
             location.setPitch(player.getLocation().getPitch());
             player.teleport(location);
         }
+    }
+
+    static public void spawnExplosion(Location location, double explosionPower) {
+        location.getWorld().createExplosion(location, (float) explosionPower, false, true);
+    }
+
+    static public Entity getEntityShooter(Arrow arrow) {
+        if (arrow.getShooter() instanceof Entity) {
+            return (Entity) arrow.getShooter();
+        }
+        return null;
     }
 }

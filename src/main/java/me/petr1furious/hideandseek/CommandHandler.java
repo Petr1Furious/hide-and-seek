@@ -2,7 +2,7 @@ package me.petr1furious.hideandseek;
 
 import java.util.List;
 
-import org.bukkit.entity.Entity;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.meta.CrossbowMeta;
 
@@ -37,22 +37,22 @@ public class CommandHandler {
         plugin.saveConfig();
     }
 
-    void startGameCommand(Entity executor, int interval, boolean teleport) {
+    void startGameCommand(CommandSender sender, int interval, boolean teleport) {
         if (plugin.getGameStatus() == GameStatus.RUNNING) {
-            executor.sendMessage(Component.text("Game is already running").color(NamedTextColor.RED));
+            sender.sendMessage(Component.text("Game is already running").color(NamedTextColor.RED));
             return;
         }
         plugin.startGame(interval, teleport);
     }
 
-    void joinGameCommand(Player executor, Player target) {
+    void joinGameCommand(CommandSender sender, Player target) {
         if (plugin.isPlayerInGame(target)) {
-            executor.sendMessage(Component.text(target.getName()).color(NamedTextColor.AQUA)
+            sender.sendMessage(Component.text(target.getName()).color(NamedTextColor.AQUA)
                 .append(Component.text(" is already in the game").color(NamedTextColor.RED)));
             return;
         }
         if (plugin.getGameStatus() == GameStatus.NOT_STARTED) {
-            executor.sendMessage(Component.text("Game is not running").color(NamedTextColor.RED));
+            sender.sendMessage(Component.text("Game is not running").color(NamedTextColor.RED));
             return;
         }
         target.sendMessage(Component.text("You joined the game").color(NamedTextColor.GREEN));
@@ -81,22 +81,22 @@ public class CommandHandler {
         manager.registerEventHandler(LifecycleEvents.COMMANDS, event -> {
             var commands = event.registrar();
             var hideAndSeekCommand = Commands.literal(name)
-                .requires(source -> source.getExecutor().hasPermission("hideandseek.command"))
+                .requires(source -> source.getSender().hasPermission("hideandseek.command"))
                 .then(Commands.literal("start").executes(ctx -> {
-                    startGameCommand(ctx.getSource().getExecutor(), 10, true);
+                    startGameCommand(ctx.getSource().getSender(), 10, true);
                     return Command.SINGLE_SUCCESS;
                 }).then(Commands.argument("interval", IntegerArgumentType.integer(1)).executes(ctx -> {
                     int interval = IntegerArgumentType.getInteger(ctx, "interval");
-                    startGameCommand(ctx.getSource().getExecutor(), interval, true);
+                    startGameCommand(ctx.getSource().getSender(), interval, true);
                     return Command.SINGLE_SUCCESS;
                 }).then(Commands.argument("teleport", BoolArgumentType.bool()).executes(ctx -> {
                     int interval = IntegerArgumentType.getInteger(ctx, "interval");
                     boolean teleport = BoolArgumentType.getBool(ctx, "teleport");
-                    startGameCommand(ctx.getSource().getExecutor(), interval, teleport);
+                    startGameCommand(ctx.getSource().getSender(), interval, teleport);
                     return Command.SINGLE_SUCCESS;
                 })))).then(Commands.literal("stop").executes(ctx -> {
                     if (plugin.getGameStatus() == GameStatus.NOT_STARTED) {
-                        ctx.getSource().getExecutor()
+                        ctx.getSource().getSender()
                             .sendMessage(Component.text("Game is not running").color(NamedTextColor.RED));
                         return Command.SINGLE_SUCCESS;
                     }
@@ -116,7 +116,7 @@ public class CommandHandler {
                         int gameRadius = IntegerArgumentType.getInteger(ctx, "radius");
                         plugin.getGameConfig().setGameRadius(gameRadius);
                         saveGameSettings();
-                        ctx.getSource().getExecutor().sendMessage(
+                        ctx.getSource().getSender().sendMessage(
                             Component.text("Game radius set to " + gameRadius).color(NamedTextColor.GREEN));
                         return Command.SINGLE_SUCCESS;
                     })))
@@ -125,7 +125,7 @@ public class CommandHandler {
                         boolean enableExplosions = BoolArgumentType.getBool(ctx, "enable");
                         plugin.getGameConfig().setEnableExplosions(enableExplosions);
                         saveGameSettings();
-                        ctx.getSource().getExecutor()
+                        ctx.getSource().getSender()
                             .sendMessage(Component.text("Explosions " + (enableExplosions ? "enabled" : "disabled"))
                                 .color(NamedTextColor.GREEN));
                         return Command.SINGLE_SUCCESS;
@@ -135,7 +135,7 @@ public class CommandHandler {
                         double explosionPower = DoubleArgumentType.getDouble(ctx, "power");
                         plugin.getGameConfig().setExplosionPower(explosionPower);
                         saveGameSettings();
-                        ctx.getSource().getExecutor().sendMessage(
+                        ctx.getSource().getSender().sendMessage(
                             Component.text("Explosion power set to " + explosionPower).color(NamedTextColor.GREEN));
                         return Command.SINGLE_SUCCESS;
                     })))
@@ -144,7 +144,7 @@ public class CommandHandler {
                         boolean enableLifts = BoolArgumentType.getBool(ctx, "enable");
                         plugin.getGameConfig().setEnableLifts(enableLifts);
                         saveGameSettings();
-                        ctx.getSource().getExecutor().sendMessage(Component
+                        ctx.getSource().getSender().sendMessage(Component
                             .text("Lifts " + (enableLifts ? "enabled" : "disabled")).color(NamedTextColor.GREEN));
                         return Command.SINGLE_SUCCESS;
                     })))
@@ -153,7 +153,8 @@ public class CommandHandler {
                         var player = (Player) ctx.getSource().getExecutor();
                         joinGameCommand(player, player);
                         return Command.SINGLE_SUCCESS;
-                    })
+                    }))
+                .then(Commands.literal("join")
                     .then(Commands.argument("player", ArgumentTypes.player()).executes(ctx -> {
                         var player = (Player) ctx.getSource().getExecutor();
                         Player target = ctx.getArgument("player", PlayerSelectorArgumentResolver.class)
@@ -161,7 +162,7 @@ public class CommandHandler {
                         joinGameCommand(player, target);
                         return Command.SINGLE_SUCCESS;
                     })))
-                .then(Commands.literal("give").requires(source -> source.getExecutor() instanceof Player)
+                .then(Commands.literal("give")
                     .then(Commands.argument("players", ArgumentTypes.players())
                         .then(Commands.argument("item", StringArgumentType.string()).suggests((ctx, builder) -> {
                             builder.suggest("infinite_crossbow");
@@ -173,13 +174,14 @@ public class CommandHandler {
                             if (item.equals("infinite_crossbow")) {
                                 giveInfiniteCrossbow(players);
                             }
-                            ctx.getSource().getExecutor().sendMessage(Component.text("Given item to players")
+                            ctx.getSource().getSender().sendMessage(Component.text("Given item to players")
                                 .color(NamedTextColor.GREEN));
                             return Command.SINGLE_SUCCESS;
                         }))))
                 .then(Commands.literal("reload").executes(ctx -> {
                     plugin.reloadConfig();
-                    ctx.getSource().getExecutor().sendMessage(Component.text("Config reloaded").color(NamedTextColor.GREEN));
+                    plugin.getGameConfig().load();
+                    ctx.getSource().getSender().sendMessage(Component.text("Config reloaded").color(NamedTextColor.GREEN));
                     return Command.SINGLE_SUCCESS;
                 }))
                 .build();

@@ -25,7 +25,7 @@ public class GameConfig {
         enableExplosions = config.getBoolean("enableExplosions", true);
         explosionPower = config.getDouble("explosionPower", 2.0f);
         enableLifts = config.getBoolean("enableLifts", true);
-        liftMaterial = Material.valueOf(config.getString("liftMaterial", "CRYING_OBSIDIAN"));
+        liftMaterial = Material.valueOf(config.getString("liftMaterial", "LIGHT_GRAY_CONCRETE"));
     }
 
     public void save() {
@@ -34,6 +34,7 @@ public class GameConfig {
         config.set("enableExplosions", enableExplosions);
         config.set("explosionPower", explosionPower);
         config.set("enableLifts", enableLifts);
+        config.set("liftMaterial", liftMaterial.toString());
     }
 
     public Vector getGameCenter() {

@@ -3,6 +3,10 @@ package me.petr1furious.hideandseek;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.damage.DamageSource;
+import org.bukkit.damage.DamageType;
+import org.bukkit.entity.Arrow;
+import org.bukkit.entity.Damageable;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -17,6 +21,7 @@ import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.ScoreboardManager;
 import org.bukkit.util.Vector;
+
 import java.util.Random;
 
 import net.kyori.adventure.text.Component;
@@ -44,7 +49,7 @@ public class HideAndSeek extends JavaPlugin implements Listener {
         gameConfig = new GameConfig(getConfig());
         commandHandler = new CommandHandler(this);
         commandHandler.registerCommands();
-        liftHandler = new LiftHandler(this);
+        liftHandler = new LiftHandler();
         registerEvents();
     }
 
@@ -163,10 +168,6 @@ public class HideAndSeek extends JavaPlugin implements Listener {
         }
     }
 
-    void spawnExplosion(Location location) {
-        location.getWorld().createExplosion(location, (float) gameConfig.getExplosionPower(), false, true);
-    }
-
     boolean checkForInfiniteCrossbow(org.bukkit.inventory.ItemStack item) {
         if (item == null) {
             return false;
@@ -216,9 +217,10 @@ public class HideAndSeek extends JavaPlugin implements Listener {
                     return;
                 }
 
-                if (event.getEntity() instanceof org.bukkit.entity.Arrow) {
-                    Location hitLocation = event.getEntity().getLocation();
-                    spawnExplosion(hitLocation);
+                if (event.getEntity() instanceof Arrow) {
+                    var arrow = (Arrow) event.getEntity();
+                    Location hitLocation = arrow.getLocation();
+                    Utils.spawnExplosion(hitLocation, gameConfig.getExplosionPower());
                     event.getEntity().remove();
                 }
             }
@@ -229,9 +231,19 @@ public class HideAndSeek extends JavaPlugin implements Listener {
                     return;
                 }
 
-                if (event.getDamager() instanceof org.bukkit.entity.Arrow) {
+                if (event.getDamager() instanceof Arrow) {
+                    var arrow = (Arrow) event.getDamager();
                     Location hitLocation = event.getEntity().getLocation();
-                    spawnExplosion(hitLocation);
+                    Utils.spawnExplosion(hitLocation, gameConfig.getExplosionPower());
+
+                    var entity = event.getEntity();
+                    var shooter = Utils.getEntityShooter(arrow);
+                    if (entity instanceof Damageable && shooter != null) {
+                        var damageable = (Damageable) entity;
+                        damageable.damage(100, DamageSource.builder(DamageType.EXPLOSION)
+                            .withDirectEntity(shooter).build());
+                        event.setCancelled(true);
+                    }
                 }
             }
 
@@ -247,7 +259,7 @@ public class HideAndSeek extends JavaPlugin implements Listener {
 
             @EventHandler
             public void onPlayerMove(org.bukkit.event.player.PlayerMoveEvent event) {
-                liftHandler.handleLift(event.getPlayer());
+                liftHandler.handleLift(event.getPlayer(), gameConfig.getLiftMaterial(), gameConfig.isEnableLifts());
             }
         }, this);
     }

@@ -7,3 +7,4 @@ gameRadius: 100
 enableExplosions: true
 explosionPower: 2.0
 enableLifts: false
+liftMaterial: "GRAY_CONCRETE"
