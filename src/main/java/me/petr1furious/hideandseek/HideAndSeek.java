@@ -112,6 +112,7 @@ public class HideAndSeek extends JavaPlugin implements Listener {
             }
         }
 
+        getServer().getScheduler().cancelTasks(this);
         getServer().getScheduler().scheduleSyncRepeatingTask(this, () -> {
             updateDistances();
         }, 0, interval * 20);
@@ -134,6 +135,8 @@ public class HideAndSeek extends JavaPlugin implements Listener {
 
     void resetGame() {
         gameStatus = GameStatus.NOT_STARTED;
+
+        getServer().getScheduler().cancelTasks(this);
 
         for (var player : getServer().getOnlinePlayers()) {
             resetPlayer(player);
