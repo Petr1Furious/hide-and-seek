@@ -14,6 +14,7 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.inventory.meta.CrossbowMeta;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scoreboard.Criteria;
 import org.bukkit.scoreboard.DisplaySlot;
@@ -23,9 +24,11 @@ import org.bukkit.scoreboard.ScoreboardManager;
 import org.bukkit.util.Vector;
 
 import java.util.Random;
+import java.util.List;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.md_5.bungee.api.ChatColor;
 
 public class HideAndSeek extends JavaPlugin implements Listener {
@@ -77,7 +80,7 @@ public class HideAndSeek extends JavaPlugin implements Listener {
     void addPlayerToGame(Player player, boolean teleport) {
         if (teleport) {
             boolean success = false;
-            for (int i = 0; i < 10; i++) {
+            for (int i = 0; i < 100; i++) {
                 Location location = Utils.getFirstSolidBlock(getRandomLocationInSphere());
                 if (location != null) {
                     player.teleport(location.add(0.5, 0, 0.5));
@@ -101,9 +104,10 @@ public class HideAndSeek extends JavaPlugin implements Listener {
         }
     }
 
-    void startGame(int interval, boolean teleport) {
+    void startGame(boolean teleport) {
         gameStatus = GameStatus.RUNNING;
         gameTeleport = teleport;
+        checkingGameEnd = false;
         getServer().sendMessage(Component.text("Starting game").color(NamedTextColor.GREEN));
 
         for (var player : getServer().getOnlinePlayers()) {
@@ -115,7 +119,7 @@ public class HideAndSeek extends JavaPlugin implements Listener {
         getServer().getScheduler().cancelTasks(this);
         getServer().getScheduler().scheduleSyncRepeatingTask(this, () -> {
             updateDistances();
-        }, 0, interval * 20);
+        }, 0, 80);
     }
 
     void stopGame() {
@@ -180,6 +184,16 @@ public class HideAndSeek extends JavaPlugin implements Listener {
             return true;
         }
         return false;
+    }
+
+    void setCrossbowMetaLore(ItemMeta meta, int projectiles) {
+        List<Component> metaLore = new java.util.ArrayList<>();
+        metaLore.add(Component.text("Crossbow with infinite ammo").color(NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        if (gameConfig.getMaxLoadedCrossbowProjectiles() > 1) {
+            metaLore.add(Component.text("Loaded: " + projectiles + "/" + gameConfig.getMaxLoadedCrossbowProjectiles())
+                .color(NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        }
+        meta.lore(metaLore);
     }
 
     void registerEvents() {
@@ -252,11 +266,26 @@ public class HideAndSeek extends JavaPlugin implements Listener {
 
             @EventHandler
             public void onPlayerInteract(org.bukkit.event.player.PlayerInteractEvent event) {
+                boolean isLeftClick = event.getAction() == org.bukkit.event.block.Action.LEFT_CLICK_AIR
+                    || event.getAction() == org.bukkit.event.block.Action.LEFT_CLICK_BLOCK;
+                var player = event.getPlayer();
                 if (checkForInfiniteCrossbow(event.getItem())) {
                     var crossbow = event.getItem();
                     var meta = (CrossbowMeta) crossbow.getItemMeta();
-                    meta.addChargedProjectile(new org.bukkit.inventory.ItemStack(org.bukkit.Material.ARROW));
-                    crossbow.setItemMeta(meta);
+                    int count = meta.getChargedProjectiles().size();
+                    if (count < gameConfig.getMaxLoadedCrossbowProjectiles()) {
+                        meta.addChargedProjectile(new org.bukkit.inventory.ItemStack(org.bukkit.Material.ARROW));
+                        setCrossbowMetaLore(meta, count + 1);
+                        crossbow.setItemMeta(meta);
+
+                        if (isLeftClick) {
+                            player.playSound(player.getLocation(), org.bukkit.Sound.BLOCK_NOTE_BLOCK_BIT, 0.1f, 2f);
+                        }
+                    } else {
+                        if (isLeftClick) {
+                            player.playSound(player.getLocation(), org.bukkit.Sound.BLOCK_NOTE_BLOCK_BIT, 0.1f, 0.5f);
+                        }
+                    }
                 }
             }
 

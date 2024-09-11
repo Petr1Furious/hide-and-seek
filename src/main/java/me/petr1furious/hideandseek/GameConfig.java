@@ -13,6 +13,7 @@ public class GameConfig {
     private double explosionPower;
     private boolean enableLifts;
     private Material liftMaterial;
+    private int maxLoadedCrossbowProjectiles;
 
     public GameConfig(FileConfiguration config) {
         this.config = config;
@@ -26,6 +27,7 @@ public class GameConfig {
         explosionPower = config.getDouble("explosionPower", 2.0f);
         enableLifts = config.getBoolean("enableLifts", true);
         liftMaterial = Material.valueOf(config.getString("liftMaterial", "LIGHT_GRAY_CONCRETE"));
+        maxLoadedCrossbowProjectiles = config.getInt("maxLoadedCrossbowProjectiles", 1);
     }
 
     public void save() {
@@ -35,6 +37,7 @@ public class GameConfig {
         config.set("explosionPower", explosionPower);
         config.set("enableLifts", enableLifts);
         config.set("liftMaterial", liftMaterial.toString());
+        config.set("maxLoadedCrossbowProjectiles", maxLoadedCrossbowProjectiles);
     }
 
     public Vector getGameCenter() {
@@ -61,6 +64,10 @@ public class GameConfig {
         return liftMaterial;
     }
 
+    public int getMaxLoadedCrossbowProjectiles() {
+        return maxLoadedCrossbowProjectiles;
+    }
+
     public void setGameCenter(Vector gameCenter) {
         this.gameCenter = gameCenter;
         save();
@@ -83,6 +90,11 @@ public class GameConfig {
 
     public void setEnableLifts(boolean enableLifts) {
         this.enableLifts = enableLifts;
+        save();
+    }
+
+    public void setMaxLoadedCrossbowProjectiles(int maxLoadedCrossbowProjectiles) {
+        this.maxLoadedCrossbowProjectiles = maxLoadedCrossbowProjectiles;
         save();
     }
 }

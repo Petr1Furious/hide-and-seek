@@ -55,7 +55,6 @@ public class LiftHandler {
                 boolean good = false;
                 for (boolean directionUp : new boolean[]{false, true}) {
                     int liftMaterialCount = checkLiftSide(location.clone().add(i - x, 0, j - z), liftMaterial, directionUp);
-                    System.out.println(directionUp + " " + liftMaterialCount + " " + liftPattern[i][j]);
                     if (liftMaterialCount == -1) {
                         continue;
                     }
