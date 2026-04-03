@@ -6,7 +6,6 @@ import me.petr1furious.hideandseek.Items;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
-import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.Sound;
@@ -60,7 +59,8 @@ public class RadarWeapon {
         }
 
         player.sendActionBar(Component.text("Radar: ").color(NamedTextColor.YELLOW)
-            .append(Component.text(target.getName(), NamedTextColor.AQUA)));
+            .append(plugin.shouldHideTrackedPlayerNames(player) ? Component.text("enemy", NamedTextColor.AQUA)
+                : Component.text(target.getName(), NamedTextColor.AQUA)));
         player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BIT, 0.2f, 2f);
         target.playSound(target.getLocation(), Sound.BLOCK_FIRE_EXTINGUISH, 0.6f, 1.5f);
     }
@@ -80,11 +80,7 @@ public class RadarWeapon {
         double maxAngle = Math.max(0.0, radar.getMaxAngleDistance());
         Vector facing = source.getEyeLocation().getDirection().normalize();
 
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            if (player == source)
-                continue;
-            if (!plugin.isPlayerInGame(player))
-                continue;
+        for (Player player : plugin.getTrackedPlayers(source)) {
 
             Vector toTarget = player.getEyeLocation().toVector().subtract(source.getEyeLocation().toVector());
             double distanceSquared = toTarget.lengthSquared();

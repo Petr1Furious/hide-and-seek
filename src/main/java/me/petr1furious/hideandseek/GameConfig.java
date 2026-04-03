@@ -17,6 +17,7 @@ public class GameConfig {
     private Vector gameCenter;
     private String gameWorld;
     private int gameRadius;
+    private GameModeType gameMode = GameModeType.CLASSIC;
     private boolean arenaBorderEnabled;
     private double arenaBorderInitialSize;
     private double arenaBorderFinalSize;
@@ -43,6 +44,7 @@ public class GameConfig {
     private final Map<String, WeaponConfig> weaponConfigIndex = new HashMap<>();
 
     private final ASPConfig aspConfig = new ASPConfig();
+    private final TeamBeaconConfig teamBeacon = new TeamBeaconConfig();
 
     public GameConfig(FileConfiguration config) {
         this.config = config;
@@ -78,6 +80,7 @@ public class GameConfig {
 
         gameWorld = config.getString("gameWorld", "world");
         gameRadius = config.getInt("gameRadius", 200);
+        gameMode = GameModeType.fromConfig(config.getString("gameMode", gameMode.getId()));
         arenaBorderEnabled = config.getBoolean("arenaBorderEnabled", false);
         arenaBorderInitialSize = Math.max(1.0, config.getDouble("arenaBorderInitialSize", 400.0));
         arenaBorderFinalSize = Math.max(1.0, config.getDouble("arenaBorderFinalSize", 100.0));
@@ -112,12 +115,14 @@ public class GameConfig {
         gameInventory = config.getList("gameInventory", new ArrayList<ItemStack>()).toArray(new ItemStack[0]);
 
         aspConfig.load(config.getConfigurationSection("asp"));
+        teamBeacon.load(config.getConfigurationSection("teamBeacon"));
     }
 
     public void save() {
         config.set("gameCenter", gameCenter);
         config.set("gameWorld", gameWorld);
         config.set("gameRadius", gameRadius);
+        config.set("gameMode", gameMode.getId());
         config.set("arenaBorderEnabled", arenaBorderEnabled);
         config.set("arenaBorderInitialSize", arenaBorderInitialSize);
         config.set("arenaBorderFinalSize", arenaBorderFinalSize);
@@ -140,6 +145,7 @@ public class GameConfig {
         config.set("enableGameInventory", enableGameInventory);
         config.set("gameInventory", gameInventory);
         aspConfig.save(getOrCreate(config, "asp"));
+        teamBeacon.save(getOrCreate(config, "teamBeacon"));
     }
 
     private org.bukkit.configuration.ConfigurationSection getOrCreate(
@@ -160,6 +166,10 @@ public class GameConfig {
 
     public int getGameRadius() {
         return gameRadius;
+    }
+
+    public GameModeType getGameMode() {
+        return gameMode;
     }
 
     public boolean isArenaBorderEnabled() {
@@ -249,6 +259,11 @@ public class GameConfig {
         save();
     }
 
+    public void setGameMode(GameModeType gameMode) {
+        this.gameMode = gameMode == null ? GameModeType.CLASSIC : gameMode;
+        save();
+    }
+
     public void setArenaBorderEnabled(boolean arenaBorderEnabled) {
         this.arenaBorderEnabled = arenaBorderEnabled;
         save();
@@ -307,5 +322,9 @@ public class GameConfig {
 
     public ASPConfig getAspConfig() {
         return aspConfig;
+    }
+
+    public TeamBeaconConfig getTeamBeacon() {
+        return teamBeacon;
     }
 }

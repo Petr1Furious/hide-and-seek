@@ -5,6 +5,9 @@ import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+
+import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.command.brigadier.argument.ArgumentTypes;
 import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver;
@@ -16,7 +19,9 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 public class CommandHandler {
     private final HideAndSeek plugin;
@@ -36,11 +41,10 @@ public class CommandHandler {
     }
 
     void startGameCommand(CommandSender sender) {
-        if (plugin.getGameStatus() == GameStatus.RUNNING) {
-            sender.sendMessage(Component.text("Game is already running").color(NamedTextColor.RED));
-            return;
+        String error = plugin.startGame(null);
+        if (error != null) {
+            sender.sendMessage(Component.text(error).color(NamedTextColor.RED));
         }
-        plugin.startGame(null);
     }
 
     void joinGameCommand(CommandSender sender, Player target) {
@@ -48,7 +52,10 @@ public class CommandHandler {
             sender.sendMessage(Component.text("Game is not running").color(NamedTextColor.RED));
             return;
         }
-        plugin.addPlayerToGame(target, true);
+        String error = plugin.addPlayerToGame(target, true);
+        if (error != null) {
+            sender.sendMessage(Component.text(error).color(NamedTextColor.RED));
+        }
     }
 
     void giveItems(List<Player> players, ItemStack item) {
@@ -77,6 +84,265 @@ public class CommandHandler {
         return null;
     }
 
+    private void suggestTeamColors(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx,
+        com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
+        for (ColorTeam team : ColorTeam.values()) {
+            builder.suggest(team.getId());
+        }
+    }
+
+    private ColorTeam getRequiredColorTeam(String raw) {
+        return ColorTeam.fromId(raw);
+    }
+
+    private void setTeam(CommandSender sender, ColorTeam team, List<Player> players) {
+        for (Player player : players) {
+            plugin.getTeamRegistry().assignPlayer(player.getUniqueId(), team);
+            plugin.getServer().sendMessage(plugin.buildTeamJoinMessage(player, team));
+            if (plugin.getGameStatus() == GameStatus.RUNNING
+                && plugin.getGameConfig().getGameMode() == GameModeType.TEAM_BEACON) {
+                plugin.handleLiveTeamChange(player, team);
+            }
+        }
+        sender.sendMessage(Component.text("Assigned " + players.size() + " player(s) to " + team.getDisplayName())
+            .color(NamedTextColor.GREEN));
+    }
+
+    private void clearTeams(CommandSender sender, List<Player> players) {
+        if (plugin.getGameStatus() == GameStatus.RUNNING
+            && plugin.getGameConfig().getGameMode() == GameModeType.TEAM_BEACON) {
+            sender.sendMessage(
+                Component.text("Team leave is only allowed between team-beacon matches").color(NamedTextColor.RED));
+            return;
+        }
+        for (Player player : players) {
+            plugin.getTeamRegistry().removePlayer(player.getUniqueId());
+        }
+        sender.sendMessage(Component.text("Cleared team assignments for " + players.size() + " player(s)")
+            .color(NamedTextColor.GREEN));
+    }
+
+    private void cycleTeam(CommandSender sender, Player player) {
+        List<ColorTeam> colors = Arrays.asList(ColorTeam.values());
+        Optional<ColorTeam> current = plugin.getTeamRegistry().getTeam(player);
+        ColorTeam next = current.map(team -> colors.get((team.ordinal() + 1) % colors.size())).orElse(ColorTeam.RED);
+        plugin.getTeamRegistry().assignPlayer(player.getUniqueId(), next);
+        plugin.getServer().sendMessage(plugin.buildTeamJoinMessage(player, next));
+        if (plugin.getGameStatus() == GameStatus.RUNNING
+            && plugin.getGameConfig().getGameMode() == GameModeType.TEAM_BEACON) {
+            plugin.handleLiveTeamChange(player, next);
+        }
+        sender
+            .sendMessage(Component.text(player.getName() + " -> " + next.getDisplayName()).color(NamedTextColor.GREEN));
+    }
+
+    private void listTeams(CommandSender sender) {
+        for (ColorTeam team : ColorTeam.values()) {
+            List<String> onlineNames = plugin.getTeamRegistry().getMembers(team).stream()
+                .map(uuid -> plugin.getServer().getPlayer(uuid)).filter(player -> player != null && player.isOnline())
+                .map(Player::getName).sorted(String::compareToIgnoreCase).toList();
+            String beaconInfo = plugin.getTeamRegistry().getBeaconDescription(team);
+            sender.sendMessage(Component.text(team.getDisplayName(), team.getTextColor())
+                .append(Component.text(": " + onlineNames.size() + " online, " + beaconInfo, NamedTextColor.GRAY)));
+            sender.sendMessage(
+                Component.text("Players: " + (onlineNames.isEmpty() ? "-" : String.join(", ", onlineNames)),
+                    NamedTextColor.DARK_GRAY));
+        }
+    }
+
+    private void setBeacon(CommandSender sender, Player player, ColorTeam team) {
+        var targetBlock = player.getTargetBlockExact(10);
+        if (targetBlock == null) {
+            sender.sendMessage(Component.text("Look at a block to set the beacon.").color(NamedTextColor.RED));
+            return;
+        }
+        plugin.getTeamRegistry().setBeacon(team, targetBlock.getLocation());
+        sender.sendMessage(Component.text(team.getDisplayName() + " beacon set").color(NamedTextColor.GREEN));
+    }
+
+    private LiteralArgumentBuilder<CommandSourceStack> buildTeamConfigCommand() {
+        return Commands.literal("teamconfig")
+            .then(Commands.argument("property", StringArgumentType.word()).suggests((ctx, builder) -> {
+                for (String property : plugin.getGameConfig().getTeamBeacon().getPropertyNames()) {
+                    builder.suggest(property);
+                }
+                return builder.buildFuture();
+            }).executes(ctx -> {
+                String property = StringArgumentType.getString(ctx, "property");
+                Object currentValue = plugin.getGameConfig().getTeamBeacon().getPropertyValue(property);
+                if (currentValue == null) {
+                    ctx.getSource().getSender()
+                        .sendMessage(Component.text("Unknown team config property").color(NamedTextColor.RED));
+                    return Command.SINGLE_SUCCESS;
+                }
+                ctx.getSource().getSender().sendMessage(
+                    Component.text("teamBeacon." + property + " = " + currentValue).color(NamedTextColor.AQUA));
+                return Command.SINGLE_SUCCESS;
+            }).then(Commands.argument("value", StringArgumentType.greedyString()).executes(ctx -> {
+                String property = StringArgumentType.getString(ctx, "property");
+                String value = StringArgumentType.getString(ctx, "value");
+                TeamBeaconConfig.WeaponSetResult result = plugin.getGameConfig().getTeamBeacon().setProperty(property,
+                    value);
+                if (result == TeamBeaconConfig.WeaponSetResult.SUCCESS) {
+                    saveGameSettings();
+                    Object newValue = plugin.getGameConfig().getTeamBeacon().getPropertyValue(property);
+                    ctx.getSource().getSender().sendMessage(
+                        Component.text("Set teamBeacon." + property + " = " + newValue).color(NamedTextColor.GREEN));
+                } else if (result == TeamBeaconConfig.WeaponSetResult.UNKNOWN_PROPERTY) {
+                    ctx.getSource().getSender()
+                        .sendMessage(Component.text("Unknown team config property").color(NamedTextColor.RED));
+                } else if (result == TeamBeaconConfig.WeaponSetResult.PARSE_ERROR) {
+                    ctx.getSource().getSender().sendMessage(Component.text("Invalid value").color(NamedTextColor.RED));
+                }
+                return Command.SINGLE_SUCCESS;
+            })));
+    }
+
+    private LiteralArgumentBuilder<CommandSourceStack> buildModeCommand() {
+        return Commands.literal("mode")
+            .then(Commands.argument("mode", StringArgumentType.word()).suggests((ctx, builder) -> {
+                builder.suggest(GameModeType.CLASSIC.getId());
+                builder.suggest(GameModeType.TEAM_BEACON.getId());
+                return builder.buildFuture();
+            }).executes(ctx -> {
+                if (plugin.getGameStatus() == GameStatus.RUNNING) {
+                    ctx.getSource().getSender()
+                        .sendMessage(Component.text("Stop the game before switching modes").color(NamedTextColor.RED));
+                    return Command.SINGLE_SUCCESS;
+                }
+                GameModeType mode = GameModeType.fromConfig(StringArgumentType.getString(ctx, "mode"));
+                plugin.getGameConfig().setGameMode(mode);
+                saveGameSettings();
+                ctx.getSource().getSender()
+                    .sendMessage(Component.text("Game mode set to " + mode.getId()).color(NamedTextColor.GREEN));
+                return Command.SINGLE_SUCCESS;
+            }));
+    }
+
+    private LiteralArgumentBuilder<CommandSourceStack> buildTeamCommand() {
+        return Commands.literal("team").then(Commands.literal("list").executes(ctx -> {
+            listTeams(ctx.getSource().getSender());
+            return Command.SINGLE_SUCCESS;
+        })).then(Commands.literal("join")
+            .then(Commands.argument("color", StringArgumentType.word()).suggests((ctx, builder) -> {
+                suggestTeamColors(ctx, builder);
+                return builder.buildFuture();
+            }).then(Commands.argument("players", ArgumentTypes.players()).executes(ctx -> {
+                ColorTeam team = getRequiredColorTeam(StringArgumentType.getString(ctx, "color"));
+                if (team == null) {
+                    ctx.getSource().getSender()
+                        .sendMessage(Component.text("Unknown team color").color(NamedTextColor.RED));
+                    return Command.SINGLE_SUCCESS;
+                }
+                List<Player> players = ctx.getArgument("players", PlayerSelectorArgumentResolver.class)
+                    .resolve(ctx.getSource());
+                setTeam(ctx.getSource().getSender(), team, players);
+                return Command.SINGLE_SUCCESS;
+            }))))
+            .then(Commands.literal("leave").then(Commands.argument("players", ArgumentTypes.players()).executes(ctx -> {
+                List<Player> players = ctx.getArgument("players", PlayerSelectorArgumentResolver.class)
+                    .resolve(ctx.getSource());
+                clearTeams(ctx.getSource().getSender(), players);
+                return Command.SINGLE_SUCCESS;
+            })))
+            .then(Commands.literal("cycle").then(Commands.argument("player", ArgumentTypes.player()).executes(ctx -> {
+                Player player = ctx.getArgument("player", PlayerSelectorArgumentResolver.class).resolve(ctx.getSource())
+                    .getFirst();
+                cycleTeam(ctx.getSource().getSender(), player);
+                return Command.SINGLE_SUCCESS;
+            }))).then(Commands.literal("swap")
+                .then(Commands.argument("color1", StringArgumentType.word()).suggests((ctx, builder) -> {
+                    suggestTeamColors(ctx, builder);
+                    return builder.buildFuture();
+                }).then(Commands.argument("color2", StringArgumentType.word()).suggests((ctx, builder) -> {
+                    suggestTeamColors(ctx, builder);
+                    return builder.buildFuture();
+                }).executes(ctx -> {
+                    ColorTeam first = getRequiredColorTeam(StringArgumentType.getString(ctx, "color1"));
+                    ColorTeam second = getRequiredColorTeam(StringArgumentType.getString(ctx, "color2"));
+                    if (first == null || second == null) {
+                        ctx.getSource().getSender()
+                            .sendMessage(Component.text("Unknown team color").color(NamedTextColor.RED));
+                        return Command.SINGLE_SUCCESS;
+                    }
+                    List<Player> affectedPlayers = new java.util.ArrayList<>(
+                        plugin.getServer().getOnlinePlayers().stream().filter(online -> plugin.getTeamRegistry()
+                            .getTeam(online).map(team -> team == first || team == second).orElse(false)).toList());
+                    plugin.getTeamRegistry().swapTeams(first, second);
+                    if (plugin.getGameStatus() == GameStatus.RUNNING
+                        && plugin.getGameConfig().getGameMode() == GameModeType.TEAM_BEACON) {
+                        for (Player online : affectedPlayers) {
+                            plugin.getTeamRegistry().getTeam(online).ifPresent(team -> {
+                                plugin.getServer().sendMessage(plugin.buildTeamJoinMessage(online, team));
+                                plugin.handleLiveTeamChange(online, team);
+                            });
+                        }
+                    } else {
+                        for (Player online : affectedPlayers) {
+                            plugin.getTeamRegistry().getTeam(online).ifPresent(
+                                team -> plugin.getServer().sendMessage(plugin.buildTeamJoinMessage(online, team)));
+                        }
+                    }
+                    ctx.getSource().getSender().sendMessage(
+                        Component.text("Swapped " + first.getDisplayName() + " and " + second.getDisplayName())
+                            .color(NamedTextColor.GREEN));
+                    return Command.SINGLE_SUCCESS;
+                }))))
+            .then(buildTeamBeaconCommand());
+    }
+
+    private LiteralArgumentBuilder<CommandSourceStack> buildTeamBeaconCommand() {
+        return Commands.literal("beacon")
+            .then(Commands.literal("set").requires(source -> source.getExecutor() instanceof Player)
+                .then(Commands.argument("color", StringArgumentType.word()).suggests((ctx, builder) -> {
+                    suggestTeamColors(ctx, builder);
+                    return builder.buildFuture();
+                }).executes(ctx -> {
+                    ColorTeam team = getRequiredColorTeam(StringArgumentType.getString(ctx, "color"));
+                    if (team == null) {
+                        ctx.getSource().getSender()
+                            .sendMessage(Component.text("Unknown team color").color(NamedTextColor.RED));
+                        return Command.SINGLE_SUCCESS;
+                    }
+                    setBeacon(ctx.getSource().getSender(), (Player) ctx.getSource().getExecutor(), team);
+                    return Command.SINGLE_SUCCESS;
+                })))
+            .then(Commands.literal("clear")
+                .then(Commands.argument("color", StringArgumentType.word()).suggests((ctx, builder) -> {
+                    suggestTeamColors(ctx, builder);
+                    return builder.buildFuture();
+                }).executes(ctx -> {
+                    ColorTeam team = getRequiredColorTeam(StringArgumentType.getString(ctx, "color"));
+                    if (team == null) {
+                        ctx.getSource().getSender()
+                            .sendMessage(Component.text("Unknown team color").color(NamedTextColor.RED));
+                        return Command.SINGLE_SUCCESS;
+                    }
+                    plugin.getTeamRegistry().clearBeacon(team);
+                    ctx.getSource().getSender().sendMessage(
+                        Component.text(team.getDisplayName() + " beacon cleared").color(NamedTextColor.GREEN));
+                    return Command.SINGLE_SUCCESS;
+                })))
+            .then(Commands.literal("info").executes(ctx -> {
+                listTeams(ctx.getSource().getSender());
+                return Command.SINGLE_SUCCESS;
+            }).then(Commands.argument("color", StringArgumentType.word()).suggests((ctx, builder) -> {
+                suggestTeamColors(ctx, builder);
+                return builder.buildFuture();
+            }).executes(ctx -> {
+                ColorTeam team = getRequiredColorTeam(StringArgumentType.getString(ctx, "color"));
+                if (team == null) {
+                    ctx.getSource().getSender()
+                        .sendMessage(Component.text("Unknown team color").color(NamedTextColor.RED));
+                    return Command.SINGLE_SUCCESS;
+                }
+                String message = plugin.getTeamRegistry().getBeaconDescription(team);
+                ctx.getSource().getSender().sendMessage(Component.text(team.getDisplayName(), team.getTextColor())
+                    .append(Component.text(": " + message, NamedTextColor.GRAY)));
+                return Command.SINGLE_SUCCESS;
+            })));
+    }
+
     void registerCommand(String name) {
         var manager = plugin.getLifecycleManager();
         manager.registerEventHandler(LifecycleEvents.COMMANDS, event -> {
@@ -87,14 +353,12 @@ public class CommandHandler {
                     startGameCommand(ctx.getSource().getSender());
                     return Command.SINGLE_SUCCESS;
                 }).then(Commands.argument("targets", ArgumentTypes.players()).executes(ctx -> {
-                    if (plugin.getGameStatus() == GameStatus.RUNNING) {
-                        ctx.getSource().getSender()
-                            .sendMessage(Component.text("Game is already running").color(NamedTextColor.RED));
-                        return Command.SINGLE_SUCCESS;
-                    }
                     List<Player> targets = ctx.getArgument("targets", PlayerSelectorArgumentResolver.class)
                         .resolve(ctx.getSource());
-                    plugin.startGame(targets);
+                    String error = plugin.startGame(targets);
+                    if (error != null) {
+                        ctx.getSource().getSender().sendMessage(Component.text(error).color(NamedTextColor.RED));
+                    }
                     return Command.SINGLE_SUCCESS;
                 }))).then(Commands.literal("stop").executes(ctx -> {
                     if (plugin.getGameStatus() == GameStatus.NOT_STARTED) {
@@ -113,8 +377,8 @@ public class CommandHandler {
                     plugin.stopGame();
                     startGameCommand(ctx.getSource().getSender());
                     return Command.SINGLE_SUCCESS;
-                })).then(Commands.literal("setcenter").requires(source -> source.getExecutor() instanceof Player)
-                    .executes(ctx -> {
+                })).then(buildModeCommand()).then(buildTeamCommand()).then(buildTeamConfigCommand()).then(Commands
+                    .literal("setcenter").requires(source -> source.getExecutor() instanceof Player).executes(ctx -> {
                         var player = (Player) ctx.getSource().getExecutor();
                         plugin.getGameConfig().setGameCenter(player.getLocation().toVector());
                         plugin.getGameConfig().setGameWorld(player.getWorld().getName());
@@ -155,9 +419,8 @@ public class CommandHandler {
                         boolean enabled = BoolArgumentType.getBool(ctx, "enable");
                         plugin.getGameConfig().setArenaBorderEnabled(enabled);
                         saveGameSettings();
-                        ctx.getSource().getSender()
-                            .sendMessage(Component.text("Arena border " + (enabled ? "enabled" : "disabled"))
-                                .color(NamedTextColor.GREEN));
+                        ctx.getSource().getSender().sendMessage(Component
+                            .text("Arena border " + (enabled ? "enabled" : "disabled")).color(NamedTextColor.GREEN));
                         return Command.SINGLE_SUCCESS;
                     })))
                 .then(Commands.literal("setarenaborderinitialsize")
@@ -183,9 +446,8 @@ public class CommandHandler {
                         int seconds = IntegerArgumentType.getInteger(ctx, "seconds");
                         plugin.getGameConfig().setArenaBorderTimeToFinalSeconds(seconds);
                         saveGameSettings();
-                        ctx.getSource().getSender().sendMessage(
-                            Component.text("Arena border shrink time set to " + seconds + "s")
-                                .color(NamedTextColor.GREEN));
+                        ctx.getSource().getSender().sendMessage(Component
+                            .text("Arena border shrink time set to " + seconds + "s").color(NamedTextColor.GREEN));
                         return Command.SINGLE_SUCCESS;
                     })))
                 .then(Commands.literal("setarenacenterradius")
@@ -194,8 +456,7 @@ public class CommandHandler {
                         plugin.getGameConfig().setArenaBorderCenterRadius(radius);
                         saveGameSettings();
                         ctx.getSource().getSender().sendMessage(
-                            Component.text("Arena border center radius set to " + radius)
-                                .color(NamedTextColor.GREEN));
+                            Component.text("Arena border center radius set to " + radius).color(NamedTextColor.GREEN));
                         return Command.SINGLE_SUCCESS;
                     })))
                 .then(Commands.literal("set")
@@ -308,8 +569,9 @@ public class CommandHandler {
                 .then(Commands.literal("reload").executes(ctx -> {
                     plugin.reloadConfig();
                     plugin.getGameConfig().load();
+                    plugin.getTeamRegistry().load();
                     ctx.getSource().getSender()
-                        .sendMessage(Component.text("Config reloaded").color(NamedTextColor.GREEN));
+                        .sendMessage(Component.text("Config and teams reloaded").color(NamedTextColor.GREEN));
                     return Command.SINGLE_SUCCESS;
                 })).then(Commands.literal("setinventory")
                     .then(Commands.argument("enable", BoolArgumentType.bool()).executes(ctx -> {
@@ -350,127 +612,79 @@ public class CommandHandler {
                             player.sendMessage(Component.text("Game inventory loaded").color(NamedTextColor.GREEN));
                             return Command.SINGLE_SUCCESS;
                         })))
-                .then(Commands.literal("asp")
-                    .then(Commands.literal("enable")
-                        .executes(ctx -> {
-                            final var cfg = plugin.getGameConfig().getAspConfig();
-                            ctx.getSource().getSender().sendMessage(Component
-                                .text("ASP support is currently " + (cfg.enable ? "enabled" : "disabled"))
-                                .color(NamedTextColor.AQUA)
-                            );
-                            return Command.SINGLE_SUCCESS;
-                        })
-                        .then(Commands.argument("enable", BoolArgumentType.bool())
-                            .executes(ctx -> {
-                                final var cfg = plugin.getGameConfig().getAspConfig();
-                                final var value = BoolArgumentType.getBool(ctx, "enable");
-                                if (cfg.enable == value) {
-                                    ctx.getSource().getSender()
-                                        .sendMessage(Component
-                                            .text("ASP support is already " + (cfg.enable ? "enabled" : "disabled"))
-                                            .color(NamedTextColor.RED)
-                                        );
-                                    return Command.SINGLE_SUCCESS;
-                                }
-                                if (value && (cfg.gameWorldName == null || cfg.templateWorldName == null)) {
-                                    ctx.getSource().getSender()
-                                        .sendMessage(Component
-                                            .text("Set template and game world names before enabling ASP support")
-                                            .color(NamedTextColor.RED)
-                                        );
-                                    return Command.SINGLE_SUCCESS;
-                                }
-                                cfg.enable = value;
-                                saveGameSettings();
-                                ctx.getSource().getSender().sendMessage(Component
-                                    .text("ASP support " + (cfg.enable ? "enabled" : "disabled"))
-                                    .color(NamedTextColor.GREEN)
-                                );
-                                return Command.SINGLE_SUCCESS;
-                            })
-                        )
-                    )
-                    .then(Commands.literal("template_world")
-                        .executes(ctx -> {
-                            final var cfg = plugin.getGameConfig().getAspConfig();
-                            ctx.getSource().getSender().sendMessage(Component
-                                .text("Template world name is currently set to " + cfg.templateWorldName)
-                                .color(NamedTextColor.AQUA)
-                            );
-                            return Command.SINGLE_SUCCESS;
-                        })
-                        .then(Commands.argument("world_name", StringArgumentType.string())
-                            .executes(ctx -> {
-                                final var cfg = plugin.getGameConfig().getAspConfig();
-                                final var worldName = StringArgumentType.getString(ctx, "world_name");
-                                cfg.templateWorldName = worldName;
-                                saveGameSettings();
-                                ctx.getSource().getSender().sendMessage(Component
-                                    .text("Template world name set to " + worldName)
-                                    .color(NamedTextColor.GREEN)
-                                );
-                                return Command.SINGLE_SUCCESS;
-                            })
-                        )
-                    )
-                    .then(Commands.literal("game_world")
-                        .executes(ctx -> {
-                            final var cfg = plugin.getGameConfig().getAspConfig();
-                            ctx.getSource().getSender().sendMessage(Component
-                                .text("Game world name is currently set to " + cfg.gameWorldName)
-                                .color(NamedTextColor.AQUA)
-                            );
-                            return Command.SINGLE_SUCCESS;
-                        })
-                        .then(Commands.argument("world_name", StringArgumentType.string())
-                            .executes(ctx -> {
-                                final var cfg = plugin.getGameConfig().getAspConfig();
-                                final var worldName = StringArgumentType.getString(ctx, "world_name");
-                                cfg.gameWorldName = worldName;
-                                saveGameSettings();
-                                ctx.getSource().getSender().sendMessage(Component
-                                    .text("Game world name set to " + worldName)
-                                    .color(NamedTextColor.GREEN)
-                                );
-                                return Command.SINGLE_SUCCESS;
-                            })
-                        )
-                    )
-                    .then(Commands.literal("reset_world_on_start")
-                        .executes(ctx -> {
-                            final var cfg = plugin.getGameConfig().getAspConfig();
-                            ctx.getSource().getSender().sendMessage(Component
-                                .text("resetWorldOnStart is currently set to " + cfg.resetWorldOnStart)
-                                .color(NamedTextColor.AQUA)
-                            );
-                            return Command.SINGLE_SUCCESS;
-                        })
-                        .then(Commands.argument("enable", BoolArgumentType.bool())
-                            .executes(ctx -> {
-                                final var cfg = plugin.getGameConfig().getAspConfig();
-                                final var value = BoolArgumentType.getBool(ctx, "enable");
-                                cfg.resetWorldOnStart = value;
-                                saveGameSettings();
-                                ctx.getSource().getSender().sendMessage(Component
-                                    .text("Set resetWorldOnStart to " + value)
-                                    .color(NamedTextColor.GREEN)
-                                );
-                                return Command.SINGLE_SUCCESS;
-                            })
-                        )
-                    )
-                    .then(Commands.literal("reset_world")
-                        .executes(ctx -> {
-                            plugin.getAsp().setupWorld(true);
-                            ctx.getSource().getSender().sendMessage(Component
-                                .text("Game world reset")
-                                .color(NamedTextColor.GREEN)
-                            );
-                            return Command.SINGLE_SUCCESS;
-                        })
-                    )
-                )
-                .build();
+                .then(Commands.literal("asp").then(Commands.literal("enable").executes(ctx -> {
+                    final var cfg = plugin.getGameConfig().getAspConfig();
+                    ctx.getSource().getSender()
+                        .sendMessage(Component.text("ASP support is currently " + (cfg.enable ? "enabled" : "disabled"))
+                            .color(NamedTextColor.AQUA));
+                    return Command.SINGLE_SUCCESS;
+                }).then(Commands.argument("enable", BoolArgumentType.bool()).executes(ctx -> {
+                    final var cfg = plugin.getGameConfig().getAspConfig();
+                    final var value = BoolArgumentType.getBool(ctx, "enable");
+                    if (cfg.enable == value) {
+                        ctx.getSource().getSender().sendMessage(
+                            Component.text("ASP support is already " + (cfg.enable ? "enabled" : "disabled"))
+                                .color(NamedTextColor.RED));
+                        return Command.SINGLE_SUCCESS;
+                    }
+                    if (value && (cfg.gameWorldName == null || cfg.templateWorldName == null)) {
+                        ctx.getSource().getSender()
+                            .sendMessage(Component.text("Set template and game world names before enabling ASP support")
+                                .color(NamedTextColor.RED));
+                        return Command.SINGLE_SUCCESS;
+                    }
+                    cfg.enable = value;
+                    saveGameSettings();
+                    ctx.getSource().getSender().sendMessage(Component
+                        .text("ASP support " + (cfg.enable ? "enabled" : "disabled")).color(NamedTextColor.GREEN));
+                    return Command.SINGLE_SUCCESS;
+                }))).then(Commands.literal("template_world").executes(ctx -> {
+                    final var cfg = plugin.getGameConfig().getAspConfig();
+                    ctx.getSource().getSender()
+                        .sendMessage(Component.text("Template world name is currently set to " + cfg.templateWorldName)
+                            .color(NamedTextColor.AQUA));
+                    return Command.SINGLE_SUCCESS;
+                }).then(Commands.argument("world_name", StringArgumentType.string()).executes(ctx -> {
+                    final var cfg = plugin.getGameConfig().getAspConfig();
+                    final var worldName = StringArgumentType.getString(ctx, "world_name");
+                    cfg.templateWorldName = worldName;
+                    saveGameSettings();
+                    ctx.getSource().getSender().sendMessage(
+                        Component.text("Template world name set to " + worldName).color(NamedTextColor.GREEN));
+                    return Command.SINGLE_SUCCESS;
+                }))).then(Commands.literal("game_world").executes(ctx -> {
+                    final var cfg = plugin.getGameConfig().getAspConfig();
+                    ctx.getSource().getSender().sendMessage(Component
+                        .text("Game world name is currently set to " + cfg.gameWorldName).color(NamedTextColor.AQUA));
+                    return Command.SINGLE_SUCCESS;
+                }).then(Commands.argument("world_name", StringArgumentType.string()).executes(ctx -> {
+                    final var cfg = plugin.getGameConfig().getAspConfig();
+                    final var worldName = StringArgumentType.getString(ctx, "world_name");
+                    cfg.gameWorldName = worldName;
+                    saveGameSettings();
+                    ctx.getSource().getSender()
+                        .sendMessage(Component.text("Game world name set to " + worldName).color(NamedTextColor.GREEN));
+                    return Command.SINGLE_SUCCESS;
+                }))).then(Commands.literal("reset_world_on_start").executes(ctx -> {
+                    final var cfg = plugin.getGameConfig().getAspConfig();
+                    ctx.getSource().getSender()
+                        .sendMessage(Component.text("resetWorldOnStart is currently set to " + cfg.resetWorldOnStart)
+                            .color(NamedTextColor.AQUA));
+                    return Command.SINGLE_SUCCESS;
+                }).then(Commands.argument("enable", BoolArgumentType.bool()).executes(ctx -> {
+                    final var cfg = plugin.getGameConfig().getAspConfig();
+                    final var value = BoolArgumentType.getBool(ctx, "enable");
+                    cfg.resetWorldOnStart = value;
+                    saveGameSettings();
+                    ctx.getSource().getSender()
+                        .sendMessage(Component.text("Set resetWorldOnStart to " + value).color(NamedTextColor.GREEN));
+                    return Command.SINGLE_SUCCESS;
+                }))).then(Commands.literal("reset_world").executes(ctx -> {
+                    plugin.getAsp().setupWorld(true);
+                    ctx.getSource().getSender()
+                        .sendMessage(Component.text("Game world reset").color(NamedTextColor.GREEN));
+                    return Command.SINGLE_SUCCESS;
+                }))).build();
             commands.register(rootBuilder);
         });
     }

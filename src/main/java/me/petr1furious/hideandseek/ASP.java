@@ -2,6 +2,9 @@ package me.petr1furious.hideandseek;
 
 import com.infernalsuite.asp.api.AdvancedSlimePaperAPI;
 import org.bukkit.Bukkit;
+import org.bukkit.GameRule;
+import org.bukkit.Registry;
+import org.bukkit.World;
 import org.bukkit.plugin.Plugin;
 
 import java.util.Objects;
@@ -39,6 +42,24 @@ public class ASP {
         }
     }
 
+    private void copyWorldSettings(World sourceWorld, World destWorld) {
+        destWorld.setDifficulty(sourceWorld.getDifficulty());
+        for (GameRule<?> gameRule : Registry.GAME_RULE) {
+            copyGameRule(sourceWorld, destWorld, gameRule);
+        }
+    }
+
+    private <T> void copyGameRule(World sourceWorld, World destWorld, GameRule<T> gameRule) {
+        try {
+            T value = sourceWorld.getGameRuleValue(gameRule);
+            if (value != null) {
+                destWorld.setGameRule(gameRule, value);
+            }
+        } catch (IllegalArgumentException exception) {
+            plugin.getLogger().fine("ASP support: Skipping unsupported game rule " + gameRule.getKey());
+        }
+    }
+
     public void setupWorld(boolean force) {
         if (!config.enable) {
             return;
@@ -57,5 +78,13 @@ public class ASP {
         }
         final var newSlimeWorld = sourceSlimeWorld.clone(destWorldName);
         asp.loadWorld(newSlimeWorld, true);
+
+        World sourceWorld = Bukkit.getWorld(sourceWorldName);
+        World destWorld = Bukkit.getWorld(destWorldName);
+        if (sourceWorld == null || destWorld == null) {
+            plugin.getLogger().warning("ASP support: Could not copy world settings after cloning");
+            return;
+        }
+        copyWorldSettings(sourceWorld, destWorld);
     }
 }

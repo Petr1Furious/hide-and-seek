@@ -3,8 +3,20 @@ gameCenter:
   x: 0.0
   y: 0.0
   z: 0.0
+gameMode: classic
 gameRadius: 100
 enableLifts: false
 liftMaterial: "GRAY_CONCRETE"
 distanceUpdateIntervalTicks: 80
 distanceGranularity: 50
+teamBeacon:
+  hidePerPlayerDistances: true
+  keepInvisibility: true
+  protectionRadius: 16
+  beaconMaxHealth: 20
+  respawnDelaySeconds: 8
+  respawnBlindnessSeconds: 8
+  disableSpawnProtectionOnAttack: true
+  spawnProtectionSeconds: 2
+  friendlyFire: false
+  beaconBlockBreaksOnlyByEnemies: true

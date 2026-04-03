@@ -6,7 +6,6 @@ import me.petr1furious.hideandseek.Items;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
-import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.Sound;
@@ -53,7 +52,10 @@ public class LocatorWeapon {
 
         double dy = nearest.getLocation().getY() - player.getLocation().getY();
         String arrows = buildArrows(dy, lc);
-        Component msg = Component.text(nearest.getName()).color(NamedTextColor.AQUA).append(Component.text(" "))
+        Component msg = (plugin.shouldHideTrackedPlayerNames(player)
+            ? Component.text("Enemy").color(NamedTextColor.AQUA)
+            : Component.text(nearest.getName()).color(NamedTextColor.AQUA))
+            .append(Component.text(" "))
             .append(Component.text(arrows).color(NamedTextColor.GOLD));
         player.sendActionBar(msg);
         player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BIT, 0.2f, 2f); // success
@@ -74,11 +76,7 @@ public class LocatorWeapon {
     private Player findNearest(Player source) {
         Player nearest = null;
         double best = Double.MAX_VALUE;
-        for (Player p : Bukkit.getOnlinePlayers()) {
-            if (p == source)
-                continue;
-            if (!plugin.isPlayerInGame(p))
-                continue;
+        for (Player p : plugin.getTrackedPlayers(source)) {
             double d = p.getLocation().distanceSquared(source.getLocation());
             if (d < best) {
                 best = d;

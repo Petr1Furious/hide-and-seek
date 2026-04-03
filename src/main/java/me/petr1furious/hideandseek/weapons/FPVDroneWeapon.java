@@ -29,9 +29,11 @@ import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.metadata.FixedMetadataValue;
+import org.bukkit.NamespacedKey;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -49,8 +51,8 @@ public class FPVDroneWeapon {
 
     private final String TAG = "fpv_drone";
     private final String ABORT_TAG = "fpv_drone_abort";
-    private final String META_ANCHOR = "fpv_anchor";
-    private final String META_DRONE_DISPLAY = "fpv_drone_display";
+    private final NamespacedKey anchorOwnerKey;
+    private final NamespacedKey droneDisplayKey;
 
     private static class DroneSession {
         final UUID playerId;
@@ -91,6 +93,8 @@ public class FPVDroneWeapon {
     public FPVDroneWeapon(GameConfig config, JavaPlugin plugin) {
         this.plugin = plugin;
         this.fpvConfig = config.getFpvDrone();
+        this.anchorOwnerKey = new NamespacedKey(plugin, "fpv_anchor_owner");
+        this.droneDisplayKey = new NamespacedKey(plugin, "fpv_drone_display");
         registerDamageListener();
         startTickTask();
     }
@@ -102,13 +106,14 @@ public class FPVDroneWeapon {
                 Entity victim = event.getEntity();
                 if (!(victim instanceof ArmorStand))
                     return;
-                if (!victim.hasMetadata(META_ANCHOR))
+                String ownerId = getAnchorOwnerId(victim.getPersistentDataContainer());
+                if (ownerId == null)
                     return;
 
                 event.getDrops().clear();
                 event.setDroppedExp(0);
 
-                UUID owner = UUID.fromString(victim.getMetadata(META_ANCHOR).get(0).asString());
+                UUID owner = UUID.fromString(ownerId);
                 DroneSession session = sessions.get(owner);
                 if (session == null || session.ended)
                     return;
@@ -215,7 +220,7 @@ public class FPVDroneWeapon {
             @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
             public void onInteractAtEntity(PlayerInteractAtEntityEvent event) {
                 Entity entity = event.getRightClicked();
-                if (entity instanceof ArmorStand && entity.hasMetadata(META_ANCHOR)) {
+                if (entity instanceof ArmorStand && isAnchor(entity.getPersistentDataContainer())) {
                     event.setCancelled(true);
                 }
                 Player p = event.getPlayer();
@@ -228,7 +233,7 @@ public class FPVDroneWeapon {
             @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
             public void onInteractEntity(PlayerInteractEntityEvent event) {
                 Entity entity = event.getRightClicked();
-                if (entity instanceof ArmorStand && entity.hasMetadata(META_ANCHOR)) {
+                if (entity instanceof ArmorStand && isAnchor(entity.getPersistentDataContainer())) {
                     event.setCancelled(true);
                 }
                 Player p = event.getPlayer();
@@ -241,7 +246,7 @@ public class FPVDroneWeapon {
             @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
             public void onArmorStandManipulate(PlayerArmorStandManipulateEvent event) {
                 ArmorStand as = event.getRightClicked();
-                if (as != null && as.hasMetadata(META_ANCHOR)) {
+                if (as != null && isAnchor(as.getPersistentDataContainer())) {
                     event.setCancelled(true);
                 }
                 Player p = event.getPlayer();
@@ -436,6 +441,14 @@ public class FPVDroneWeapon {
         return original.clone();
     }
 
+    private String getAnchorOwnerId(PersistentDataContainer container) {
+        return container.get(anchorOwnerKey, PersistentDataType.STRING);
+    }
+
+    private boolean isAnchor(PersistentDataContainer container) {
+        return container.has(anchorOwnerKey, PersistentDataType.STRING);
+    }
+
     private void startSession(Player player) {
         Location origin = player.getLocation();
 
@@ -447,7 +460,8 @@ public class FPVDroneWeapon {
             as.setGravity(true);
             as.setArms(true);
             as.setBasePlate(false);
-            as.setMetadata(META_ANCHOR, new FixedMetadataValue(plugin, player.getUniqueId().toString()));
+            as.getPersistentDataContainer().set(anchorOwnerKey, PersistentDataType.STRING,
+                player.getUniqueId().toString());
             var inv = player.getInventory();
             if (as.getEquipment() != null) {
                 as.getEquipment().setHelmet(cloneItem(inv.getHelmet()));
@@ -461,7 +475,7 @@ public class FPVDroneWeapon {
 
         BlockDisplay display = origin.getWorld().spawn(origin, BlockDisplay.class, bd -> {
             bd.setBlock(Bukkit.createBlockData(Material.IRON_TRAPDOOR));
-            bd.setMetadata(META_DRONE_DISPLAY, new FixedMetadataValue(plugin, true));
+            bd.getPersistentDataContainer().set(droneDisplayKey, PersistentDataType.BYTE, (byte) 1);
             bd.setTeleportDuration(1);
         });
         GameMode originalMode = player.getGameMode();
