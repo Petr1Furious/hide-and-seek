@@ -5,16 +5,15 @@ import org.bukkit.Bukkit;
 import org.bukkit.GameRule;
 import org.bukkit.Registry;
 import org.bukkit.World;
-import org.bukkit.plugin.Plugin;
 
 import java.util.Objects;
 
 public class ASP {
     private final ASPConfig config;
-    private final Plugin plugin;
+    private final HideAndSeek plugin;
     private AdvancedSlimePaperAPI asp;
 
-    public ASP(ASPConfig config, Plugin plugin) {
+    public ASP(ASPConfig config, HideAndSeek plugin) {
         this.config = config;
         this.plugin = plugin;
     }
@@ -86,5 +85,6 @@ public class ASP {
             return;
         }
         copyWorldSettings(sourceWorld, destWorld);
+        plugin.applyConfiguredGameRules(destWorld);
     }
 }

@@ -32,6 +32,7 @@ public class GameConfig {
 
     private ItemStack[] gameInventory;
     private boolean enableGameInventory;
+    private boolean enforceGameRules;
 
     private final InfiniteCrossbowConfig infiniteCrossbow = new InfiniteCrossbowConfig();
     private final OreshnikConfig oreshnik = new OreshnikConfig();
@@ -113,6 +114,7 @@ public class GameConfig {
 
         enableGameInventory = config.getBoolean("enableGameInventory", false);
         gameInventory = config.getList("gameInventory", new ArrayList<ItemStack>()).toArray(new ItemStack[0]);
+        enforceGameRules = config.getBoolean("enforceGameRules", true);
 
         aspConfig.load(config.getConfigurationSection("asp"));
         teamBeacon.load(config.getConfigurationSection("teamBeacon"));
@@ -144,6 +146,7 @@ public class GameConfig {
         grappleBow.save(getOrCreate(weaponsRoot, "grapple_bow"));
         config.set("enableGameInventory", enableGameInventory);
         config.set("gameInventory", gameInventory);
+        config.set("enforceGameRules", enforceGameRules);
         aspConfig.save(getOrCreate(config, "asp"));
         teamBeacon.save(getOrCreate(config, "teamBeacon"));
     }
@@ -244,6 +247,10 @@ public class GameConfig {
         return enableGameInventory;
     }
 
+    public boolean isEnforceGameRules() {
+        return enforceGameRules;
+    }
+
     public void setGameCenter(Vector gameCenter) {
         this.gameCenter = gameCenter;
         save();
@@ -311,6 +318,11 @@ public class GameConfig {
 
     public void setEnableGameInventory(boolean enableGameInventory) {
         this.enableGameInventory = enableGameInventory;
+        save();
+    }
+
+    public void setEnforceGameRules(boolean enforceGameRules) {
+        this.enforceGameRules = enforceGameRules;
         save();
     }
 

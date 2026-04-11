@@ -9,6 +9,7 @@ enableLifts: false
 liftMaterial: "GRAY_CONCRETE"
 distanceUpdateIntervalTicks: 80
 distanceGranularity: 50
+enforceGameRules: true
 teamBeacon:
   hidePerPlayerDistances: true
   keepInvisibility: true

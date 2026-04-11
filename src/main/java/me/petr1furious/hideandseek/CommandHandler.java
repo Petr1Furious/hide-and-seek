@@ -462,20 +462,12 @@ public class CommandHandler {
                 .then(Commands.literal("set")
                     .then(Commands.argument("weapon", StringArgumentType.string()).suggests((ctx, builder) -> {
                         builder.suggest("infinite_crossbow");
-                        builder.suggest("ic");
                         builder.suggest("oreshnik");
-                        builder.suggest("o");
                         builder.suggest("himars");
-                        builder.suggest("h");
                         builder.suggest("locator");
-                        builder.suggest("l");
                         builder.suggest("fpv_drone");
-                        builder.suggest("fpv");
                         builder.suggest("radar");
-                        builder.suggest("r");
                         builder.suggest("grapple_bow");
-                        builder.suggest("grapple");
-                        builder.suggest("gb");
                         return builder.buildFuture();
                     }).then(Commands.argument("property", StringArgumentType.string()).suggests((ctx, builder) -> {
                         String weapon = StringArgumentType.getString(ctx, "weapon");

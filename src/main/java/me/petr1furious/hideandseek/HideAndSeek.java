@@ -178,6 +178,7 @@ public class HideAndSeek extends JavaPlugin implements Listener {
         }
 
         asp.setupWorld(false);
+        applyConfiguredGameRules(getConfiguredWorld());
         setupArenaBorder();
 
         activeRuntime = gameConfig.getGameMode() == GameModeType.TEAM_BEACON ? teamBeaconMatchRuntime
@@ -194,6 +195,22 @@ public class HideAndSeek extends JavaPlugin implements Listener {
 
         getServer().sendMessage(Component.text("Starting game").color(NamedTextColor.GREEN));
         return null;
+    }
+
+    void applyConfiguredGameRules(World world) {
+        if (!gameConfig.isEnforceGameRules() || world == null) {
+            return;
+        }
+
+        world.setGameRule(GameRules.KEEP_INVENTORY, true);
+        world.setGameRule(GameRules.SPAWN_MOBS, false);
+        world.setGameRule(GameRules.BLOCK_DROPS, false);
+        world.setGameRule(GameRules.MOB_DROPS, false);
+        world.setGameRule(GameRules.SHOW_ADVANCEMENT_MESSAGES, false);
+        world.setGameRule(GameRules.SPAWN_PATROLS, false);
+        world.setGameRule(GameRules.SPAWN_PHANTOMS, false);
+        world.setGameRule(GameRules.SPAWN_WANDERING_TRADERS, false);
+        world.setGameRule(GameRules.RAIDS, false);
     }
 
     void stopGame() {
